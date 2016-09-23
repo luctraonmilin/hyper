@@ -1,4 +1,6 @@
-
+{-
+ - Hyper is an HTTP server.
+ -}
 module Hyper where
 
 import Network (listenOn, withSocketsDo, accept, PortID(..), Socket)
@@ -59,6 +61,8 @@ instance Show StatusLine where
 
 type Processor = Request -> Response
 
+type Route = (String, Processor)
+
 parseRequestLine :: String -> RequestLine
 parseRequestLine line =
         let [method, uri, version] = words $ rstrip line
@@ -79,24 +83,23 @@ parseRequest contents =
       headers = map (\line -> parseHeader line) (drop 1 requestEnveloppe)
         in Request requestLine headers body
 
-connect :: Socket -> IO ()
-connect socket = do
-  (handle, hostName, portNumber) <- accept socket
-  hSetBuffering handle NoBuffering
-  forkIO $ process handle
-  connect socket
-
 newLine :: String
 newLine = "\r\n"
 
 helloWorldResponse :: Response
-helloWorldResponse = Response (StatusLine "HTTP/1.1" "200" "OK") [] "Hello world!"
+helloWorldResponse = Response (StatusLine "HTTP/1.1" "200" "OK") [] ""
 
 writeResponse :: Handle -> Response -> IO ()
 writeResponse handle response = do hPutStrLn handle (show response)
 
+ok :: String -> Response
+ok content = Response (StatusLine "HTTP/1.1" "200" "OK") [] content
+
+notFound :: Response
+notFound = Response (StatusLine "HTTP/1.1" "404" "Not Found") [] ""
+
 bufferSize :: Int
-bufferSize = 2048
+bufferSize = 4096
 
 readAll :: Handle -> String -> IO String
 readAll handle input = do
@@ -105,16 +108,38 @@ readAll handle input = do
   then return input
   else readAll handle (input ++ C.unpack line)
 
-process :: Handle -> IO ()
-process handle = do
+
+match :: Request -> Route -> Bool
+match request route = uri (requestLine request) == fst route
+
+getResponse :: Request -> [Route] -> Response
+getResponse request routes =
+  foldl (\result route -> if match request route then (snd route) request else result) notFound routes
+
+process :: Handle -> [Route] -> IO ()
+process handle routes = do
   contents <- readAll handle []
   let request = parseRequest contents
         in do
+          -- TODO log requests.
           putStrLn $ show request
-          writeResponse handle helloWorldResponse
+          writeResponse handle (getResponse request routes)
+
+connect :: Socket -> [Route] -> IO ()
+connect socket routes = do
+  (handle, hostName, portNumber) <- accept socket
+  hSetBuffering handle NoBuffering
+  forkIO $ process handle routes
+  connect socket routes
+
+dispatcher :: [Route]
+dispatcher =
+  [ ("/",           \_ -> ok "Welcome to the home page!")
+  , ("/intranet",   \_ -> ok "Welcome to the intranet!")
+  ]
 
 main :: IO ()
 main = withSocketsDo $ do
   socket <- listenOn $ PortNumber 3000
-  connect socket
+  connect socket dispatcher
 
