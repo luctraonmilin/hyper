@@ -11,6 +11,7 @@ import Data.List.Split (splitOn)
 import Data.List (intercalate)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
+import Data.Time
 
 data Request = Request
         { requestLine :: RequestLine
@@ -24,7 +25,10 @@ data RequestLine = RequestLine
         , uri :: String
         , version :: String
         }
-        deriving (Show)
+
+instance Show RequestLine where
+  show (RequestLine method uri version) =
+    method ++ " " ++ uri ++ " " ++ version
 
 data Header = Header
         { name :: String
@@ -86,11 +90,10 @@ parseRequest contents =
 newLine :: String
 newLine = "\r\n"
 
-helloWorldResponse :: Response
-helloWorldResponse = Response (StatusLine "HTTP/1.1" "200" "OK") [] ""
-
 writeResponse :: Handle -> Response -> IO ()
 writeResponse handle response = do hPutStrLn handle (show response)
+
+-- TODO defaultHeaders :: [Header]
 
 ok :: String -> Response
 ok content = Response (StatusLine "HTTP/1.1" "200" "OK") [] content
@@ -108,7 +111,6 @@ readAll handle input = do
   then return input
   else readAll handle (input ++ C.unpack line)
 
-
 match :: Request -> Route -> Bool
 match request route = uri (requestLine request) == fst route
 
@@ -116,13 +118,18 @@ getResponse :: Request -> [Route] -> Response
 getResponse request routes =
   foldl (\result route -> if match request route then (snd route) request else result) notFound routes
 
+logRequest :: Request -> IO ()
+logRequest request = do
+  time <- fmap show getZonedTime
+  let path = show $ requestLine request
+        in putStrLn $ time ++ " " ++ path
+
 process :: Handle -> [Route] -> IO ()
 process handle routes = do
   contents <- readAll handle []
   let request = parseRequest contents
         in do
-          -- TODO log requests.
-          putStrLn $ show request
+          logRequest request
           writeResponse handle (getResponse request routes)
 
 connect :: Socket -> [Route] -> IO ()
