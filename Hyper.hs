@@ -107,7 +107,7 @@ bufferSize = 4096
 readAll :: Handle -> String -> IO String
 readAll handle input = do
   line <- B.hGetNonBlocking handle bufferSize
-  if line == C.empty
+  if line == C.empty && (not $ null input)
   then return input
   else readAll handle (input ++ C.unpack line)
 
@@ -139,14 +139,17 @@ connect socket routes = do
   forkIO $ process handle routes
   connect socket routes
 
-dispatcher :: [Route]
-dispatcher =
+serve :: [Route] -> IO ()
+serve dispatcher  = withSocketsDo $ do
+  socket <- listenOn $ PortNumber 3000
+  connect socket dispatcher
+
+routes :: [Route]
+routes =
   [ ("/",           \_ -> ok "Welcome to the home page!")
   , ("/intranet",   \_ -> ok "Welcome to the intranet!")
   ]
 
 main :: IO ()
-main = withSocketsDo $ do
-  socket <- listenOn $ PortNumber 3000
-  connect socket dispatcher
+main = serve routes
 
