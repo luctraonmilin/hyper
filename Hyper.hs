@@ -94,8 +94,6 @@ newLine = "\r\n"
 writeResponse :: Handle -> Response -> IO ()
 writeResponse handle response = do hPutStrLn handle (show response)
 
--- TODO defaultHeaders :: [Header]
-
 ok :: String -> Processor
 ok content = \handle request -> writeResponse handle (Response (StatusLine "HTTP/1.1" "200" "OK") [] content)
 
@@ -161,7 +159,7 @@ routes :: [Route]
 routes =
   [ ("/",               ok "Welcome to the home page!")
   , ("/intranet",       ok "Welcome to the intranet!")
-  , ("/www/*",            serveDirectory ".")
+  , ("/www/*",          serveDirectory ".")
   ]
 
 main :: IO ()
