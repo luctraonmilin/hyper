@@ -13,6 +13,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import Data.Time
 import System.Directory (doesFileExist)
+import Text.Regex
 
 data Request = Request
         { requestLine :: RequestLine
@@ -92,7 +93,9 @@ newLine :: String
 newLine = "\r\n"
 
 writeResponse :: Handle -> Response -> IO ()
-writeResponse handle response = do hPutStrLn handle (show response)
+writeResponse handle response = do
+  putStrLn $ show $ statusLine response
+  hPutStrLn handle (show response)
 
 ok :: String -> Processor
 ok content = \handle request -> writeResponse handle (Response (StatusLine "HTTP/1.1" "200" "OK") [] content)
@@ -111,7 +114,12 @@ readAll handle input = do
   else readAll handle (input ++ C.unpack line)
 
 match :: Request -> Route -> Bool
-match request route = uri (requestLine request) == fst route
+match request route = --uri (requestLine request) == fst route
+  let path = uri $ requestLine request
+      expression = mkRegex $ fst route
+        in case matchRegex expression path of
+          Nothing -> False
+          Just _ -> True
 
 getProcessor :: Request -> [Route] -> Processor
 getProcessor request routes =
@@ -144,14 +152,15 @@ serve dispatcher  = withSocketsDo $ do
   socket <- listenOn $ PortNumber 3000
   connect socket dispatcher
 
-serveDirectory :: String -> Processor
-serveDirectory directory = \handle request ->
-  let path = (directory ++ (uri (requestLine request)))
+serveDirectory :: String -> String -> Processor
+serveDirectory directory prefix = \handle request ->
+  let path = drop (length prefix) (uri $ requestLine request)
+      filePath = directory ++ path
         in do
-          exists <- doesFileExist path
+          exists <- doesFileExist filePath
           if exists
           then do
-            content <- readFile path
+            content <- readFile filePath
             writeResponse handle (Response (StatusLine "HTTP/1.1" "200" "OK") [] content)
           else notFound handle request
 
@@ -159,7 +168,7 @@ routes :: [Route]
 routes =
   [ ("/",               ok "Welcome to the home page!")
   , ("/intranet",       ok "Welcome to the intranet!")
-  , ("/www/*",          serveDirectory ".")
+  , ("/www/.*",         serveDirectory "www" "/www")
   ]
 
 main :: IO ()
