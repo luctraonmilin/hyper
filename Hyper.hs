@@ -12,6 +12,7 @@ import Data.List (intercalate)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import Data.Time
+import System.Directory (doesFileExist)
 
 data Request = Request
         { requestLine :: RequestLine
@@ -63,7 +64,7 @@ instance Show StatusLine where
   show (StatusLine version status reason) =
     version ++ " " ++ status ++ " " ++ reason
 
-type Processor = Request -> Response
+type Processor = Handle -> Request -> IO ()
 
 type Route = (String, Processor)
 
@@ -95,11 +96,11 @@ writeResponse handle response = do hPutStrLn handle (show response)
 
 -- TODO defaultHeaders :: [Header]
 
-ok :: String -> Response
-ok content = Response (StatusLine "HTTP/1.1" "200" "OK") [] content
+ok :: String -> Processor
+ok content = \handle request -> writeResponse handle (Response (StatusLine "HTTP/1.1" "200" "OK") [] content)
 
-notFound :: Response
-notFound = Response (StatusLine "HTTP/1.1" "404" "Not Found") [] ""
+notFound :: Processor
+notFound = \handle request -> writeResponse handle (Response (StatusLine "HTTP/1.1" "404" "Not Found") [] "")
 
 bufferSize :: Int
 bufferSize = 4096
@@ -114,9 +115,9 @@ readAll handle input = do
 match :: Request -> Route -> Bool
 match request route = uri (requestLine request) == fst route
 
-getResponse :: Request -> [Route] -> Response
-getResponse request routes =
-  foldl (\result route -> if match request route then (snd route) request else result) notFound routes
+getProcessor :: Request -> [Route] -> Processor
+getProcessor request routes =
+  foldl (\result route -> if match request route then snd route else result) notFound routes
 
 logRequest :: Request -> IO ()
 logRequest request = do
@@ -128,9 +129,10 @@ process :: Handle -> [Route] -> IO ()
 process handle routes = do
   contents <- readAll handle []
   let request = parseRequest contents
+      processor = getProcessor request routes
         in do
           logRequest request
-          writeResponse handle (getResponse request routes)
+          processor handle request
 
 connect :: Socket -> [Route] -> IO ()
 connect socket routes = do
@@ -144,10 +146,22 @@ serve dispatcher  = withSocketsDo $ do
   socket <- listenOn $ PortNumber 3000
   connect socket dispatcher
 
+serveDirectory :: String -> Processor
+serveDirectory directory = \handle request ->
+  let path = (directory ++ (uri (requestLine request)))
+        in do
+          exists <- doesFileExist path
+          if exists
+          then do
+            content <- readFile path
+            writeResponse handle (Response (StatusLine "HTTP/1.1" "200" "OK") [] content)
+          else notFound handle request
+
 routes :: [Route]
 routes =
-  [ ("/",           \_ -> ok "Welcome to the home page!")
-  , ("/intranet",   \_ -> ok "Welcome to the intranet!")
+  [ ("/",               ok "Welcome to the home page!")
+  , ("/intranet",       ok "Welcome to the intranet!")
+  , ("/www/*",            serveDirectory ".")
   ]
 
 main :: IO ()
