@@ -36,7 +36,9 @@ data Header = Header
         { name :: String
         , value :: String
         }
-        deriving (Show)
+
+instance Show Header where
+  show header = (name header) ++ ":" ++ " " ++ (value header)
 
 type Body = String
 
@@ -152,17 +154,35 @@ serve dispatcher  = withSocketsDo $ do
   socket <- listenOn $ PortNumber 3000
   connect socket dispatcher
 
+mimeTypes =
+  [ ("html", "text/html")
+  ]
+
+mimeType :: String -> String
+mimeType path =
+  let extension = last $ splitOn "." path
+        in foldl (\result pair -> if extension == fst pair then snd pair else result) "application/octet-stream" mimeTypes
+
+serveFile :: String -> Processor
+serveFile path = \handle request -> do
+  exists <- doesFileExist path
+  if exists
+  then do
+    content <- readFile path
+    let contentType = Header "Content-Type" (mimeType path)
+        contentLength = Header "Content-Length:" (show $ length content)
+        in do
+          content <- readFile path
+          putStrLn $ show contentType
+          writeResponse handle (Response (StatusLine "HTTP/1.1" "200" "0K") [contentType, contentLength] content)
+  else
+    notFound handle request
+
 serveDirectory :: String -> String -> Processor
 serveDirectory directory prefix = \handle request ->
   let path = drop (length prefix) (uri $ requestLine request)
       filePath = directory ++ path
-        in do
-          exists <- doesFileExist filePath
-          if exists
-          then do
-            content <- readFile filePath
-            writeResponse handle (Response (StatusLine "HTTP/1.1" "200" "OK") [] content)
-          else notFound handle request
+        in (serveFile filePath) handle request
 
 routes :: [Route]
 routes =
